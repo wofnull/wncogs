@@ -1,0 +1,11 @@
+{
+    "name": "PalworldStatus",
+    "author": ["WoFNuLL"],
+    "description": "Palworld Server Status Monitor (V3)",
+    "install_msg": "PalworldStatus geladen. Nutze [p]pwsetup",
+    "short": "Palworld Status",
+    "requirements": ["aiohttp"],
+    "tags": ["palworld", "server", "status"],
+    "min_bot_version": "3.5.0",
+    "hidden": false
+}
