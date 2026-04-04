@@ -3,6 +3,7 @@ from redbot.core import commands, Config
 from discord.ext import tasks
 import aiohttp
 import base64
+import json
 from datetime import datetime
 
 class PalworldStatusV3(commands.Cog):
@@ -128,18 +129,27 @@ class PalworldStatusV3(commands.Cog):
         try:
             async with aiohttp.ClientSession() as session:
 
-                # INFO
+                # INFO (FIXED)
                 async with session.get(f"{api_url}/v1/api/info", headers=headers, timeout=10) as r:
-                    info = await r.json()
+                    text = await r.text()
+                    try:
+                        info = json.loads(text)
+                    except:
+                        info = {}
 
-                # METRICS
+                # METRICS (FIXED)
                 async with session.get(f"{api_url}/v1/api/metrics", headers=headers, timeout=10) as r:
-                    metrics = await r.json()
+                    text = await r.text()
+                    try:
+                        metrics = json.loads(text)
+                    except:
+                        metrics = {}
 
-                # PLAYERS (failsafe + correct structure)
+                # PLAYERS (FIXED + FAILSAFE)
                 try:
                     async with session.get(f"{api_url}/v1/api/players", headers=headers, timeout=10) as r:
-                        pdata = await r.json()
+                        text = await r.text()
+                        pdata = json.loads(text) if text.strip() else {}
                         players = pdata.get("players", [])
                         if not isinstance(players, list):
                             players = []
@@ -160,7 +170,7 @@ class PalworldStatusV3(commands.Cog):
 
             percent = int((current / max_players) * 100) if max_players else 0
 
-            # 🔥 Spielerliste (max 20)
+            # Spieler (max 20)
             if players:
                 player_lines = [
                     f"👤 `{p.get('name','Unknown')} (Lv.{p.get('level','?')})`"
