@@ -86,7 +86,7 @@ class PalworldStatusV3(commands.Cog):
     # -------------------------
     # HELPER
     # -------------------------
-    def make_bar(self, current, max_players, length=12):
+    def make_bar(self, current, max_players, length=32):
         if max_players == 0:
             return "░" * length
 
