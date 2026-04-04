@@ -2,26 +2,25 @@ import discord
 from redbot.core import commands, Config
 from discord.ext import tasks
 import aiohttp
+import base64
 from datetime import datetime
 
 class PalworldStatusV3(commands.Cog):
-    """Palworld Server Status V3 - Overkill UI"""
 
     def __init__(self, bot):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=1122334455)
+        self.config = Config.get_conf(self, identifier=987654321)
 
-        default_global = {
-            "api_url": None,
-            "admin_password": None,
-            "message_id": None,
-            "channel_id": None,
-            "last_online": None,
-            "cached_name": "Unknown Server",
-            "server_start": None
-        }
+        self.config.register_global(
+            api_url=None,
+            admin_password=None,
+            message_id=None,
+            channel_id=None,
+            last_online=None,
+            cached_name="Unknown Server"
+        )
 
-        self.config.register_global(**default_global)
+    def cog_load(self):
         self.update_loop.start()
 
     def cog_unload(self):
@@ -34,7 +33,7 @@ class PalworldStatusV3(commands.Cog):
     async def pwsetup(self, ctx, api_url: str):
         await self.config.api_url.set(api_url)
 
-        await ctx.author.send("🔐 Bitte sende mir das Admin Passwort:")
+        await ctx.author.send("🔐 Bitte sende das Admin Passwort:")
 
         def check(m):
             return m.author == ctx.author and isinstance(m.channel, discord.DMChannel)
@@ -50,16 +49,16 @@ class PalworldStatusV3(commands.Cog):
     @commands.command()
     async def pwstart(self, ctx, channel: discord.TextChannel):
         embed = discord.Embed(
-            title="🚀 Starte Monitoring...",
+            title="🚀 Initialisiere Serverstatus...",
             color=discord.Color.orange()
         )
 
-        msg = await channel.send(embed=embed)
+        message = await channel.send(embed=embed)
 
         await self.config.channel_id.set(channel.id)
-        await self.config.message_id.set(msg.id)
+        await self.config.message_id.set(message.id)
 
-        await ctx.send("✅ Monitoring aktiv.")
+        await ctx.send("✅ Embed läuft.")
 
     # -------------------------
     # STOP
@@ -78,15 +77,15 @@ class PalworldStatusV3(commands.Cog):
                 except:
                     pass
 
-        await self.config.channel_id.set(None)
         await self.config.message_id.set(None)
+        await self.config.channel_id.set(None)
 
-        await ctx.send("🛑 Monitoring gestoppt.")
+        await ctx.send("🛑 Embed gestoppt.")
 
     # -------------------------
-    # HELPERS
+    # HELPER
     # -------------------------
-    def make_bar(self, current, max_players, length=16):
+    def make_bar(self, current, max_players, length=12):
         if max_players == 0:
             return "░" * length
 
@@ -94,18 +93,11 @@ class PalworldStatusV3(commands.Cog):
         filled = int(ratio * length)
         return "█" * filled + "░" * (length - filled)
 
-    def get_color(self, current, max_players):
-        if max_players == 0:
-            return discord.Color.greyple()
-
-        ratio = current / max_players
-
-        if ratio < 0.5:
-            return discord.Color.green()
-        elif ratio < 0.8:
-            return discord.Color.gold()
-        else:
-            return discord.Color.red()
+    def format_uptime(self, seconds):
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h:02}:{m:02}:{s:02}"
 
     # -------------------------
     # LOOP
@@ -129,60 +121,70 @@ class PalworldStatusV3(commands.Cog):
         except:
             return
 
-        headers = {"Authorization": f"Basic {password}"}
+        # 🔐 Auth Fix
+        auth = base64.b64encode(f"admin:{password}".encode()).decode()
+        headers = {"Authorization": f"Basic {auth}"}
 
         try:
             async with aiohttp.ClientSession() as session:
+
+                # INFO
                 async with session.get(f"{api_url}/v1/api/info", headers=headers, timeout=10) as r:
                     info = await r.json()
 
-                async with session.get(f"{api_url}/v1/api/players", headers=headers, timeout=10) as r:
-                    players = await r.json()
+                # METRICS
+                async with session.get(f"{api_url}/v1/api/metrics", headers=headers, timeout=10) as r:
+                    metrics = await r.json()
+
+                # PLAYERS (failsafe + correct structure)
+                try:
+                    async with session.get(f"{api_url}/v1/api/players", headers=headers, timeout=10) as r:
+                        pdata = await r.json()
+                        players = pdata.get("players", [])
+                        if not isinstance(players, list):
+                            players = []
+                except:
+                    players = []
 
             now = datetime.utcnow()
 
-            name = info.get("servername", "Unknown")
+            server_name = info.get("servername", "Unknown Server")
             version = info.get("version", "Unknown")
-            current = info.get("numplayers", 0)
-            max_players = info.get("maxplayers", 0)
 
-            # Uptime
-            if not await self.config.server_start():
-                await self.config.server_start.set(now.isoformat())
+            current = metrics.get("currentplayernum", len(players))
+            max_players = metrics.get("maxplayernum", 0)
+            uptime = self.format_uptime(metrics.get("uptime", 0))
 
-            start = datetime.fromisoformat(await self.config.server_start())
-            uptime = str(now - start).split(".")[0]
-
-            # Cache
-            await self.config.cached_name.set(name)
+            await self.config.cached_name.set(server_name)
             await self.config.last_online.set(now.isoformat())
 
-            # Progressbar
-            bar = self.make_bar(current, max_players)
             percent = int((current / max_players) * 100) if max_players else 0
 
-            # Spieler Tabelle
+            # 🔥 Spielerliste (max 20)
             if players:
-                lines = [f"{p.get('name')[:18]:<18}" for p in players]
-                player_table = "```" + "\n".join(lines) + "```"
+                player_lines = [
+                    f"👤 `{p.get('name','Unknown')} (Lv.{p.get('level','?')})`"
+                    for p in players[:20]
+                ]
+                player_text = "\n".join(player_lines)
             else:
-                player_table = "`Keine Spieler online`"
+                player_text = "`Keine Spieler online`"
 
             embed = discord.Embed(
-                title=f"🟢 {name}",
+                title=f"🟢 {server_name}",
                 description=f"**Version:** `{version}`",
-                color=self.get_color(current, max_players)
+                color=discord.Color.green()
             )
 
             embed.add_field(
                 name="📊 Auslastung",
-                value=f"`{bar}`\n**{current}/{max_players} ({percent}%)**",
+                value=f"`{self.make_bar(current, max_players)}`\n**{current}/{max_players} ({percent}%)**",
                 inline=False
             )
 
             embed.add_field(
                 name="⚡ Status",
-                value=f"🟢 Online\n⏱ Uptime: `{uptime}`",
+                value=f"🟢 Online\n⏱ `{uptime}`",
                 inline=True
             )
 
@@ -194,43 +196,23 @@ class PalworldStatusV3(commands.Cog):
 
             embed.add_field(
                 name="👥 Spieler",
-                value=player_table,
+                value=player_text,
                 inline=False
             )
 
-            embed.set_footer(text="Palworld Monitor V3 • Ultra UI")
+            embed.set_footer(text="Palworld Server Monitor • Update alle 60s")
             embed.timestamp = now
 
-        except Exception:
-            cached_name = await self.config.cached_name()
-            last_online = await self.config.last_online()
+        except Exception as e:
+            print("ERROR:", e)
 
-            if last_online:
-                last = datetime.fromisoformat(last_online)
-                offline = datetime.utcnow() - last
-                offline_str = str(offline).split(".")[0]
-                last_seen = int(last.timestamp())
-            else:
-                offline_str = "Unbekannt"
-                last_seen = None
+            cached_name = await self.config.cached_name()
 
             embed = discord.Embed(
                 title=f"🔴 {cached_name}",
-                description="**SERVER OFFLINE**",
-                color=discord.Color.dark_red()
+                description="```SERVER OFFLINE```",
+                color=discord.Color.red()
             )
-
-            value = f"⏱ Offline seit: `{offline_str}`"
-            if last_seen:
-                value += f"\n🕒 Last Seen: <t:{last_seen}:R>"
-
-            embed.add_field(
-                name="📉 Status",
-                value=value,
-                inline=False
-            )
-
-            embed.set_footer(text="Letzter bekannter Zustand")
 
         await message.edit(embed=embed)
 
