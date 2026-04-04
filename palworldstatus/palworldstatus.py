@@ -4,7 +4,7 @@ from discord.ext import tasks
 import aiohttp
 import base64
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 class PalworldStatusV3(commands.Cog):
 
@@ -156,7 +156,7 @@ class PalworldStatusV3(commands.Cog):
                 except:
                     players = []
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             server_name = info.get("servername", "Unknown Server")
             version = info.get("version", "Unknown")
