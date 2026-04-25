@@ -226,6 +226,14 @@ class PalworldStatusV3(commands.Cog):
 
         await message.edit(embed=embed)
 
+    @update_loop.error
+    async def update_loop_error(self, error):
+        print("LOOP ERROR:", repr(error))
+
+        if not self.update_loop.is_running():
+            print("Restarting update_loop...")
+            self.update_loop.start()
+
     @update_loop.before_loop
     async def before_loop(self):
         await self.bot.wait_until_ready()
