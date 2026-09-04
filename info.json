@@ -1,8 +1,12 @@
 {
-    "author": ["WoFNuLL"],
-    "install_msg": "WoFNuLL - Repo Installed Access for Several COGS",
-    "name": "wncogs",
-    "short": "Just some tools for red.",
-    "description": "Fun cogs developed by WoFNuLL.",
-    "tags": ["usefull"]
+    "author": ["Martin"],
+    "name": "TopGamesVotes",
+    "short": "Live top-games.net voter leaderboard embed",
+    "description": "Polls one or more top-games.net API keys, aggregates the vote counts of all players, caches the results locally and posts/updates a live Discord embed showing the current top 10 voters and the top 3 voters from last month.",
+    "requirements": [],
+    "tags": ["voting", "leaderboard", "top-games", "embed", "stats"],
+    "min_bot_version": "3.5.0",
+    "hidden": false,
+    "disabled": false,
+    "type": "COG"
 }
