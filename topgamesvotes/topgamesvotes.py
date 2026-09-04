@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -283,35 +284,122 @@ class TopGamesVotes(commands.Cog):
     async def tgvotes_apikey(self, ctx: commands.Context):
         """Manage the configured top-games.net API keys."""
 
+    @staticmethod
+    def _mask_key(key: str) -> str:
+        """Mask an API key for safe display, keeping only a few edge chars."""
+        if len(key) <= 8:
+            return "*" * len(key)
+        return f"{key[:4]}{'*' * (len(key) - 8)}{key[-4:]}"
+
+    def _dm_check(self, ctx: commands.Context):
+        def check(m: discord.Message):
+            return m.author.id == ctx.author.id and isinstance(m.channel, discord.DMChannel)
+        return check
+
+    async def _nudge_to_dm(self, ctx: commands.Context, note: str):
+        """Delete the invoking message (if in a guild) and point the user to their DMs."""
+        if ctx.guild is not None:
+            try:
+                await ctx.message.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                pass
+            await ctx.send(f"{ctx.author.mention} {note}", delete_after=15)
+
     @tgvotes_apikey.command(name="add")
-    async def tgvotes_apikey_add(self, ctx: commands.Context, api_key: str):
-        """Add a top-games.net server API key."""
+    async def tgvotes_apikey_add(self, ctx: commands.Context):
+        """Add a top-games.net server API key.
+
+        API keys are secrets, so this never asks for them in a public
+        channel. Run the command and reply in your DMs instead.
+        """
+        try:
+            await ctx.author.send(
+                "Please reply here with the top-games.net API key you want to add. "
+                "This request expires in 2 minutes."
+            )
+        except discord.Forbidden:
+            await self._nudge_to_dm(ctx, "I can't DM you. Please enable DMs from server members and try again.")
+            return
+
+        await self._nudge_to_dm(ctx, "Check your DMs to add an API key.")
+
+        try:
+            msg = await self.bot.wait_for("message", check=self._dm_check(ctx), timeout=120)
+        except asyncio.TimeoutError:
+            await ctx.author.send("⌛ Timed out waiting for the API key. Please run the command again.")
+            return
+
+        api_key = msg.content.strip()
+        if not api_key:
+            await ctx.author.send("That didn't look like a valid API key. Please run the command again.")
+            return
+
         async with self.config.api_keys() as keys:
             if api_key in keys:
-                await ctx.send("That API key is already configured.")
+                await ctx.author.send("That API key is already configured.")
                 return
             keys.append(api_key)
-        await ctx.send(f"API key `{api_key}` added. {len(await self.config.api_keys())} key(s) configured.")
+
+        count = len(await self.config.api_keys())
+        await ctx.author.send(f"✅ API key `{self._mask_key(api_key)}` added. {count} key(s) now configured.")
 
     @tgvotes_apikey.command(name="remove")
-    async def tgvotes_apikey_remove(self, ctx: commands.Context, api_key: str):
-        """Remove a previously configured API key."""
-        async with self.config.api_keys() as keys:
-            if api_key not in keys:
-                await ctx.send("That API key is not configured.")
-                return
-            keys.remove(api_key)
-        await ctx.send(f"API key `{api_key}` removed.")
-
-    @tgvotes_apikey.command(name="list")
-    async def tgvotes_apikey_list(self, ctx: commands.Context):
-        """List all configured API keys."""
+    async def tgvotes_apikey_remove(self, ctx: commands.Context):
+        """Remove a configured API key via a private DM prompt."""
         keys = await self.config.api_keys()
         if not keys:
             await ctx.send("No API keys configured yet.")
             return
-        formatted = "\n".join(f"- `{k}`" for k in keys)
-        await ctx.send(f"Configured API keys ({len(keys)}):\n{formatted}")
+
+        listing = "\n".join(f"{i}. `{self._mask_key(k)}`" for i, k in enumerate(keys, start=1))
+        prompt = f"Which API key do you want to remove? Reply with its number:\n{listing}"
+
+        try:
+            await ctx.author.send(prompt)
+        except discord.Forbidden:
+            await self._nudge_to_dm(ctx, "I can't DM you. Please enable DMs from server members and try again.")
+            return
+
+        await self._nudge_to_dm(ctx, "Check your DMs to remove an API key.")
+
+        try:
+            msg = await self.bot.wait_for("message", check=self._dm_check(ctx), timeout=120)
+        except asyncio.TimeoutError:
+            await ctx.author.send("⌛ Timed out. Please run the command again.")
+            return
+
+        current_keys = await self.config.api_keys()
+        try:
+            idx = int(msg.content.strip()) - 1
+            if idx < 0 or idx >= len(current_keys):
+                raise ValueError
+        except ValueError:
+            await ctx.author.send("Invalid selection. Please run the command again.")
+            return
+
+        removed = current_keys[idx]
+        async with self.config.api_keys() as keys2:
+            keys2.pop(idx)
+
+        await ctx.author.send(f"✅ API key `{self._mask_key(removed)}` removed.")
+
+    @tgvotes_apikey.command(name="list")
+    async def tgvotes_apikey_list(self, ctx: commands.Context):
+        """List configured API keys, sent privately via DM."""
+        keys = await self.config.api_keys()
+        if not keys:
+            message = "No API keys configured yet."
+        else:
+            formatted = "\n".join(f"- `{self._mask_key(k)}`" for k in keys)
+            message = f"Configured API keys ({len(keys)}):\n{formatted}"
+
+        try:
+            await ctx.author.send(message)
+        except discord.Forbidden:
+            await self._nudge_to_dm(ctx, "I can't DM you. Please enable DMs from server members and try again.")
+            return
+
+        await self._nudge_to_dm(ctx, "Check your DMs for the API key list.")
 
     @tgvotes.command(name="channel")
     async def tgvotes_channel(self, ctx: commands.Context, channel: discord.TextChannel):
